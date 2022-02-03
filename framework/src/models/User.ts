@@ -1,48 +1,54 @@
-import axios, { AxiosResponse } from "axios";
+import { Eventing } from './Eventing';
+import { Sync } from './Sync';
+import { Attributes } from './Attributes';
+import { AxiosResponse } from 'axios';
 
-interface UserProps {
+export interface UserProps {
   id?: number;
   name?: string;
   age?: number;
 }
 
-type Cb = () => void;
+const rootUrl = 'http://localhost:3000/users';
 
 export class User {
-  observe: { [key: string]: Cb[] } = {};
+  public events: Eventing = new Eventing();
+  public sync: Sync<UserProps> = new Sync<UserProps>(rootUrl);
+  public attributes: Attributes<UserProps>;
 
-  constructor(private data: UserProps) {}
+  constructor(data: UserProps) {
+    this.attributes = new Attributes<UserProps>(data);
+  }
 
-  get(prop: string): number | string {
-    return this.data[prop];
+  get on() {
+    return this.events.on;
+  }
+
+  get trigger() {
+    return this.events.trigger;
+  }
+
+  get get() {
+    return this.attributes.get;
   }
 
   set(update: UserProps): void {
-    Object.assign(this.data, update);
-  }
-
-  on(eventName: string, callback: Cb):void {
-      this.observe[eventName] = this.observe[eventName] || [];
-      this.observe[eventName].push(callback);
-  }
-
-  trigger(eventName: string): void {
-      if (!(this.observe[eventName] && this.observe[eventName].length)) return;
-
-      this.observe[eventName].forEach(callback => callback());
+    this.attributes.set(update);
+    this.events.trigger('change');
   }
 
   fetch(): void {
-    axios.get(`http://localhost:3000/users/${this.get('id')}`)
-      .then((response: AxiosResponse): void => this.set(response.data));
+    const id = this.attributes.get('id');
+
+    if (!id) throw new Error('ID not found');
+
+    this.sync.fetch(id).then((response: AxiosResponse) => this.set(response.data));
   }
 
-  save():void {
-    const id = this.get('id');
-    if (id) {
-      axios.put(`http://localhost:3000/users/${id}`, this.data);
-    } else {
-      axios.post('http://localhost:3000/users', this.data);
-    }
+  save(): void {
+    this.sync
+      .save(this.attributes.getAll())
+      .then((response: AxiosResponse): void => this.trigger('save'))
+      .catch(() => this.trigger('error'))
   }
 }
